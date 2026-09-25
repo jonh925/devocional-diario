@@ -321,7 +321,7 @@ export default function Page() {
                       </div>
                     )}
 
-                    <p className="mt-4 text-sm leading-6 text-zinc-400 whitespace-pre-wrap break-words break-all line-clamp-3">
+                    <p className="mt-4 text-sm leading-6 text-zinc-400 whitespace-pre-wrap break-words line-clamp-3">
                       {post.content}
                     </p>
                   </div>
@@ -410,6 +410,7 @@ export default function Page() {
                 <textarea
                   required
                   rows={6}
+                  spellCheck={true}
                   placeholder="O que Deus tem falado ao seu coração hoje?"
                   value={formData.content}
                   onChange={(e) => setFormData({ ...formData, content: e.target.value })}
@@ -463,7 +464,7 @@ export default function Page() {
                 </div>
               )}
 
-              <p className="text-base leading-relaxed text-zinc-300 whitespace-pre-wrap break-words break-all">
+              <p className="text-base leading-relaxed text-zinc-300 whitespace-pre-wrap break-word">
                 {readingPost.content}
               </p>
             </div>
@@ -493,6 +494,7 @@ export default function Page() {
               <form onSubmit={handleCommentSubmit} className="flex gap-3 mb-8">
                 <input
                   type="text"
+                  spellCheck={true}
                   placeholder="Deixe uma mensagem de apoio..."
                   value={newComment}
                   onChange={(e) => setNewComment(e.target.value)}
