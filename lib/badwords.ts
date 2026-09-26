@@ -9,7 +9,6 @@ export const FORBIDDEN_WORDS = [
     'aidética',
     'aidético',
     'aleijada',
-    'aleijado',
     'anã',
     'analfabeta',
     'analfabeto',
@@ -48,7 +47,6 @@ export const FORBIDDEN_WORDS = [
     'bosta',
     'bostana',
     'branquelo',
-    'brecha',
     'brexa',
     'brioco',
     'bronha',
@@ -390,4 +388,9 @@ export const FORBIDDEN_WORDS = [
       const regex = new RegExp(`\\b${word}\\b`, 'i')
       return regex.test(lowerText)
     })
+  }
+  export const hasLinks = (text: string) => {
+    // Essa regra identifica "http", "https", "www." e terminações como ".com", ".br", etc.
+    const urlPattern = /(https?:\/\/[^\s]+)|(www\.[^\s]+)|([a-zA-Z0-9-]+\.[a-z]{2,})/gi;
+    return urlPattern.test(text);
   }

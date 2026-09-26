@@ -7,7 +7,7 @@ import { getToken } from 'firebase/messaging'
 import { onAuthStateChanged } from 'firebase/auth'
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, getDoc, updateDoc, deleteDoc, arrayUnion, arrayRemove } from 'firebase/firestore'
 import { BookOpen, Check, Heart, HandHeart, PenLine, Sparkles, Loader2, LogOut, Shield, X, Edit2, Trash2, MessageCircle, Send, Sun, Moon, Bell, BellRing } from 'lucide-react'
-import { hasForbiddenWords } from '@/lib/badwords'
+import { hasForbiddenWords ,hasLinks } from '@/lib/badwords'
 
 
 const AVATAR_COLORS = [
@@ -143,25 +143,40 @@ export default function Page() {
       return
     }
 
+    // SE O SININHO JÁ ESTÁ ATIVO, VAMOS DESATIVAR
+    if (notificationsEnabled) {
+      if (currentUser) {
+        try {
+          // Muda o status no banco para false, assim o servidor ignora este usuário
+          await updateDoc(doc(db, 'usuarios', currentUser.uid), {
+            wantsNotifications: false
+          })
+          setNotificationsEnabled(false)
+          alert('Notificações silenciadas! Você não será mais avisado.')
+        } catch (error) {
+          console.error("Erro ao silenciar notificações:", error)
+        }
+      }
+      return
+    }
+
+    // SE O SININHO ESTÁ DESATIVADO, VAMOS ATIVAR
     if (Notification.permission === 'default' || Notification.permission === 'granted') {
       const permission = await Notification.requestPermission()
       
       if (permission === 'granted') {
-        setNotificationsEnabled(true)
-        
         try {
           if (currentUser && messaging) {
-            // Gera o Token único para este celular/computador
             const currentToken = await getToken(messaging, {
-              vapidKey: 'BDa7E_5oZrV7rM2ELCqoRCL3dXfCiXdB1uZXFw7wTC-dtSgVUrzd9kbQJgdJK7h1VWEtnpvygE-O5NT-g7_rkXY' // 
+              vapidKey: 'BDa7E_5oZrV7rM2ELCqoRCL3dXfCiXdB1uZXFw7wTC-dtSgVUrzd9kbQJgdJK7h1VWEtnpvygE-O5NT-g7_rkXY'
             })
 
             if (currentToken) {
-              // Salva o Token no perfil do usuário
               await updateDoc(doc(db, 'usuarios', currentUser.uid), {
                 wantsNotifications: true,
                 fcmToken: currentToken
               })
+              setNotificationsEnabled(true)
               alert('Tudo certo! As notificações estão ativadas para este dispositivo.')
             }
           }
@@ -210,7 +225,12 @@ export default function Page() {
       alert("Por favor, revise a sua mensagem. Algumas palavras não são permitidas em nossa comunidade.")
       return
     }
-    
+    // NOVO: Bloqueia os links nos comentários
+    if (hasLinks(newComment)) {
+      alert("Não é permitido enviar links na nossa comunidade.")
+      return
+    }
+
     setIsSubmittingComment(true)
     try {
       await addDoc(collection(db, 'devocionais', readingPostId, 'comentarios'), {
@@ -257,6 +277,11 @@ export default function Page() {
 
     if (hasForbiddenWords(formData.title) || hasForbiddenWords(formData.content)) {
       alert("Por favor, revise o seu texto. Algumas palavras utilizadas não são permitidas em nossa comunidade.")
+      return
+    }
+    // NOVO: Bloqueia os links nos títulos e conteúdos dos devocionais
+    if (hasLinks(formData.title) || hasLinks(formData.content)) {
+      alert("Não é permitido incluir links nos devocionais.")
       return
     }
 
