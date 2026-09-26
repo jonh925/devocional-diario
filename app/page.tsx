@@ -262,10 +262,18 @@ export default function Page() {
 
     setIsSubmitting(true)
     try {
-      const postData = { title: formData.title, verse: formData.verse, reference: formData.reference, content: formData.content }
+      const postData = {
+        title: formData.title,
+        verse: formData.verse,
+        reference: formData.reference,
+        content: formData.content,
+      }
+
       if (editingId) {
+        // Atualiza post existente (não envia notificação para não fazer spam)
         await updateDoc(doc(db, 'devocionais', editingId), postData)
       } else {
+        // Cria um NOVO post
         await addDoc(collection(db, 'devocionais'), {
           ...postData,
           authorName: currentUser.nome,
@@ -275,7 +283,22 @@ export default function Page() {
           prayedBy: [],
           createdAt: serverTimestamp()
         })
+
+        // NOVO: Chama o servidor para enviar a notificação push
+        try {
+          await fetch('/api/notify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: formData.title,
+              authorName: currentUser.nome
+            })
+          })
+        } catch (notifyError) {
+          console.error("Falha ao notificar utilizadores:", notifyError)
+        }
       }
+      
       setFormData({ title: '', verse: '', reference: '', content: '' })
       setEditingId(null)
       setIsModalOpen(false)
