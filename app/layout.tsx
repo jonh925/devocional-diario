@@ -25,9 +25,12 @@ export const metadata: Metadata = {
   },
 }
 
+// ATUALIZADO: Agora suporta as cores dos dois modos dinamicamente
 export const viewport: Viewport = {
-  colorScheme: 'dark',
-  themeColor: '#09090b',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+    { media: '(prefers-color-scheme: dark)', color: '#09090b' },
+  ],
 }
 
 export default function RootLayout({
@@ -36,7 +39,8 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="pt-BR">
+    // ATUALIZADO: suppressHydrationWarning é obrigatório para alternar temas no Next.js
+    <html lang="pt-BR" suppressHydrationWarning>
       <body className="antialiased">
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}
