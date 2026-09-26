@@ -1,8 +1,9 @@
 import { initializeApp, getApps, getApp } from 'firebase/app'
 import { getAuth } from 'firebase/auth'
 import { getFirestore } from 'firebase/firestore'
+import { getMessaging } from "firebase/messaging";
 
-// Substitua com as SUAS chaves do Firebase Console
+// chaves do Firebase Console
 const firebaseConfig = {
     apiKey: "AIzaSyBn-IMbJVVB4WQYGJ-BaejOtYqUMXX8ORI",
     authDomain: "devocional-diario-2d1e1.firebaseapp.com",
@@ -18,3 +19,5 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp()
 // Exporta as ferramentas que vamos usar nas telas
 export const auth = getAuth(app)
 export const db = getFirestore(app)
+// Inicializa o mensageiro apenas no navegador (para não quebrar o Next.js no servidor)
+export const messaging = typeof window !== "undefined" ? getMessaging(app) : null;

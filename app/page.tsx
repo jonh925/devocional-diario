@@ -2,12 +2,27 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { auth, db } from '@/lib/firebase'
+import { auth, db,messaging } from '@/lib/firebase'
+import { getToken } from 'firebase/messaging'
 import { onAuthStateChanged } from 'firebase/auth'
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, getDoc, updateDoc, deleteDoc, arrayUnion, arrayRemove } from 'firebase/firestore'
-import { BookOpen, Check, Heart, HandHeart, PenLine, Sparkles, Loader2, LogOut, Shield, X, Edit2, Trash2, MessageCircle, Send, Sun, Moon } from 'lucide-react'
-
+import { BookOpen, Check, Heart, HandHeart, PenLine, Sparkles, Loader2, LogOut, Shield, X, Edit2, Trash2, MessageCircle, Send, Sun, Moon, Bell, BellRing } from 'lucide-react'
 import { hasForbiddenWords } from '@/lib/badwords'
+
+
+const AVATAR_COLORS = [
+  { id: 'emerald', bg: 'from-emerald-300 to-emerald-700', text: 'text-emerald-950', label: 'Verde' },
+  { id: 'blue', bg: 'from-blue-300 to-blue-700', text: 'text-blue-950', label: 'Azul' },
+  { id: 'purple', bg: 'from-purple-300 to-purple-700', text: 'text-purple-950', label: 'Roxo' },
+  { id: 'rose', bg: 'from-rose-300 to-rose-700', text: 'text-rose-950', label: 'Rosa' },
+  { id: 'amber', bg: 'from-amber-300 to-amber-700', text: 'text-amber-950', label: 'Amarelo' },
+  { id: 'indigo', bg: 'from-indigo-300 to-indigo-700', text: 'text-indigo-950', label: 'Índigo' }
+]
+
+const getAvatarClasses = (colorId: string) => {
+  const color = AVATAR_COLORS.find(c => c.id === colorId) || AVATAR_COLORS[0]
+  return `${color.bg} ${color.text}`
+}
 
 export default function Page() {
   const router = useRouter()
@@ -16,12 +31,18 @@ export default function Page() {
   const [isLoading, setIsLoading] = useState(true)
   const [currentUser, setCurrentUser] = useState<any>(null)
 
-  // ESTADO DO TEMA (Modo Claro / Escuro)
   const [theme, setTheme] = useState<'light' | 'dark'>('dark')
+  
+  // NOVO: Controle visual do Sininho de Notificação
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false)
 
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [readingPostId, setReadingPostId] = useState<string | null>(null)
   
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false)
+  const [selectedColor, setSelectedColor] = useState('emerald')
+  const [isUpdatingProfile, setIsUpdatingProfile] = useState(false)
+
   const [comments, setComments] = useState<any[]>([])
   const [newComment, setNewComment] = useState('')
   const [isSubmittingComment, setIsSubmittingComment] = useState(false)
@@ -30,7 +51,6 @@ export default function Page() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
 
-  // Verifica Autenticação
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (!user) {
@@ -47,6 +67,7 @@ export default function Page() {
             router.push('/login')
           } else {
             setCurrentUser({ uid: user.uid, ...userData })
+            setSelectedColor(userData.avatarColor || 'emerald')
             setIsLoading(false)
           }
         } else {
@@ -61,10 +82,15 @@ export default function Page() {
     return () => unsubscribe()
   }, [router])
 
-  // Busca Devocionais em Tempo Real
+  // NOVO: Verifica se o usuário já deu permissão no navegador
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      setNotificationsEnabled(Notification.permission === 'granted')
+    }
+  }, [])
+
   useEffect(() => {
     if (!currentUser) return
-
     const q = query(collection(db, 'devocionais'), orderBy('createdAt', 'desc'))
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const fetched = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
@@ -73,44 +99,31 @@ export default function Page() {
     return () => unsubscribe()
   }, [currentUser])
 
-  // Busca Comentários do Post Aberto
   useEffect(() => {
     if (!readingPostId) {
       setComments([])
       return
     }
-
-    const q = query(
-      collection(db, 'devocionais', readingPostId, 'comentarios'), 
-      orderBy('createdAt', 'desc')
-    )
-    
+    const q = query(collection(db, 'devocionais', readingPostId, 'comentarios'), orderBy('createdAt', 'desc'))
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const fetched = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
       setComments(fetched)
     })
-    
     return () => unsubscribe()
   }, [readingPostId])
 
-  // NOVO: Carrega o Tema Salvo
   useEffect(() => {
     const storedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null
     if (storedTheme) {
       setTheme(storedTheme)
-      if (storedTheme === 'light') {
-        document.documentElement.classList.remove('dark')
-      } else {
-        document.documentElement.classList.add('dark')
-      }
+      if (storedTheme === 'light') document.documentElement.classList.remove('dark')
+      else document.documentElement.classList.add('dark')
     } else {
-      // Padrão do app é escuro
       document.documentElement.classList.add('dark')
       localStorage.setItem('theme', 'dark')
     }
   }, [])
 
-  // NOVO: Alterna o Tema
   const toggleTheme = () => {
     if (theme === 'dark') {
       document.documentElement.classList.remove('dark')
@@ -123,10 +136,63 @@ export default function Page() {
     }
   }
 
+  // NOVO: Lógica para pedir permissão ao celular/navegador
+  const handleNotificationToggle = async () => {
+    if (!('Notification' in window)) {
+      alert('Seu dispositivo ou navegador não suporta notificações web.')
+      return
+    }
+
+    if (Notification.permission === 'default' || Notification.permission === 'granted') {
+      const permission = await Notification.requestPermission()
+      
+      if (permission === 'granted') {
+        setNotificationsEnabled(true)
+        
+        try {
+          if (currentUser && messaging) {
+            // Gera o Token único para este celular/computador
+            const currentToken = await getToken(messaging, {
+              vapidKey: 'BDa7E_5oZrV7rM2ELCqoRCL3dXfCiXdB1uZXFw7wTC-dtSgVUrzd9kbQJgdJK7h1VWEtnpvygE-O5NT-g7_rkXY' // 
+            })
+
+            if (currentToken) {
+              // Salva o Token no perfil do usuário
+              await updateDoc(doc(db, 'usuarios', currentUser.uid), {
+                wantsNotifications: true,
+                fcmToken: currentToken
+              })
+              alert('Tudo certo! As notificações estão ativadas para este dispositivo.')
+            }
+          }
+        } catch (error) {
+          console.error("Erro ao gerar token de notificação:", error)
+        }
+      } else {
+        alert('Você negou a permissão. Não enviaremos notificações.')
+      }
+    } else {
+      alert('Você bloqueou as notificações anteriormente. Para ativar, altere a permissão manualmente clicando no cadeado ao lado do endereço do site.')
+    }
+  }
+
+  const handleUpdateProfile = async () => {
+    if (!currentUser) return
+    setIsUpdatingProfile(true)
+    try {
+      await updateDoc(doc(db, 'usuarios', currentUser.uid), { avatarColor: selectedColor })
+      setCurrentUser({ ...currentUser, avatarColor: selectedColor })
+      setIsProfileModalOpen(false)
+    } catch (error) {
+      console.error("Erro ao atualizar perfil", error)
+    } finally {
+      setIsUpdatingProfile(false)
+    }
+  }
+
   const toggleInteraction = async (postId: string, field: 'likedBy' | 'prayedBy', isCurrentlyActive: boolean) => {
     if (!currentUser) return
     const postRef = doc(db, 'devocionais', postId)
-    
     try {
       await updateDoc(postRef, {
         [field]: isCurrentlyActive ? arrayRemove(currentUser.uid) : arrayUnion(currentUser.uid)
@@ -151,6 +217,7 @@ export default function Page() {
         text: newComment.trim(),
         authorName: currentUser.nome,
         authorId: currentUser.uid,
+        authorColor: currentUser.avatarColor || 'emerald',
         createdAt: serverTimestamp()
       })
       setNewComment('')
@@ -169,12 +236,7 @@ export default function Page() {
 
   const openEditModal = (post: any) => {
     setEditingId(post.id)
-    setFormData({ 
-      title: post.title, 
-      verse: post.verse || '', 
-      reference: post.reference || '', 
-      content: post.content 
-    })
+    setFormData({ title: post.title, verse: post.verse || '', reference: post.reference || '', content: post.content })
     setIsModalOpen(true)
   }
 
@@ -199,15 +261,8 @@ export default function Page() {
     }
 
     setIsSubmitting(true)
-
     try {
-      const postData = {
-        title: formData.title,
-        verse: formData.verse,
-        reference: formData.reference,
-        content: formData.content,
-      }
-
+      const postData = { title: formData.title, verse: formData.verse, reference: formData.reference, content: formData.content }
       if (editingId) {
         await updateDoc(doc(db, 'devocionais', editingId), postData)
       } else {
@@ -215,12 +270,12 @@ export default function Page() {
           ...postData,
           authorName: currentUser.nome,
           authorId: currentUser.uid,
+          authorColor: currentUser.avatarColor || 'emerald',
           likedBy: [],
           prayedBy: [],
           createdAt: serverTimestamp()
         })
       }
-      
       setFormData({ title: '', verse: '', reference: '', content: '' })
       setEditingId(null)
       setIsModalOpen(false)
@@ -239,9 +294,7 @@ export default function Page() {
   const getInitials = (name: string) => {
     if (!name) return 'U'
     const names = name.split(' ')
-    if (names.length >= 2) {
-      return `${names[0][0]}${names[names.length - 1][0]}`.toUpperCase()
-    }
+    if (names.length >= 2) return `${names[0][0]}${names[names.length - 1][0]}`.toUpperCase()
     return name.slice(0, 2).toUpperCase()
   }
 
@@ -275,9 +328,21 @@ export default function Page() {
             </div>
           </div>
           
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1 sm:gap-2">
             
-            {/* BOTÃO DE TEMA CLARO/ESCURO */}
+            {/* NOVO: Botão de Notificação */}
+            <button 
+              onClick={handleNotificationToggle}
+              className="p-2 text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300 transition-colors rounded-full"
+              title="Ativar Notificações"
+            >
+              {notificationsEnabled ? (
+                <BellRing className="size-5 text-emerald-500" />
+              ) : (
+                <Bell className="size-5" />
+              )}
+            </button>
+
             <button 
               onClick={toggleTheme} 
               className="p-2 text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300 transition-colors rounded-full"
@@ -289,18 +354,22 @@ export default function Page() {
             {currentUser?.role === 'admin' && (
               <button 
                 onClick={() => router.push('/admin')}
-                className="hidden sm:flex items-center gap-1.5 rounded-xl bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400 transition hover:bg-emerald-500/20 active:scale-95"
+                className="flex items-center gap-1.5 rounded-xl bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400 transition hover:bg-emerald-500/20 active:scale-95"
               >
                 <Shield className="size-4" />
-                <span>Admin</span>
+                <span className="hidden sm:inline">Admin</span>
               </button>
             )}
 
             <button onClick={handleLogout} className="text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300 transition-colors p-2">
               <LogOut className="size-5" />
             </button>
-            <button className="rounded-full p-0.5 transition hover:ring-2 hover:ring-emerald-400/40 ml-1">
-              <span className="flex size-10 items-center justify-center rounded-full bg-gradient-to-br from-emerald-300 to-emerald-700 text-sm font-bold text-zinc-950">
+            
+            <button 
+              onClick={() => setIsProfileModalOpen(true)}
+              className="rounded-full p-0.5 transition hover:ring-2 hover:ring-emerald-400/40 ml-1"
+            >
+              <span className={`flex size-10 items-center justify-center rounded-full bg-gradient-to-br ${getAvatarClasses(currentUser?.avatarColor)} text-sm font-bold shadow-sm`}>
                 {getInitials(currentUser?.nome)}
               </span>
             </button>
@@ -335,7 +404,7 @@ export default function Page() {
                 <article key={post.id} className="rounded-3xl border border-zinc-200 dark:border-white/[0.07] bg-white dark:bg-zinc-900 p-5 shadow-xl shadow-zinc-200/50 dark:shadow-2xl dark:shadow-black/10 transition hover:border-emerald-400/30 sm:p-6 duration-300">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-3">
-                      <span className="flex size-10 items-center justify-center rounded-2xl text-xs font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-300">
+                      <span className={`flex size-10 items-center justify-center rounded-full bg-gradient-to-br ${getAvatarClasses(post.authorColor)} text-sm font-bold shadow-sm`}>
                         {getInitials(post.authorName)}
                       </span>
                       <div>
@@ -413,7 +482,53 @@ export default function Page() {
         <PenLine className="size-6" />
       </button>
 
-      {/* MODAL DE CRIAÇÃO / EDIÇÃO */}
+      {isProfileModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/40 dark:bg-black/80 p-4 backdrop-blur-sm transition-colors">
+          <div className="w-full max-w-sm rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-6 shadow-2xl transition-colors duration-300">
+            <div className="mb-6 flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-zinc-900 dark:text-white">Seu Perfil</h2>
+              <button onClick={() => setIsProfileModalOpen(false)} className="rounded-full p-2 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 hover:text-zinc-800 dark:hover:text-white transition-colors">
+                <X className="size-5" />
+              </button>
+            </div>
+
+            <div className="flex flex-col items-center gap-4 mb-8">
+              <div className={`flex size-24 items-center justify-center rounded-full bg-gradient-to-br ${getAvatarClasses(selectedColor)} text-2xl font-bold shadow-lg transition-all duration-300`}>
+                {getInitials(currentUser?.nome)}
+              </div>
+              <div className="text-center">
+                <p className="font-semibold text-lg text-zinc-900 dark:text-white">{currentUser?.nome}</p>
+                <p className="text-sm text-zinc-500">{currentUser?.email}</p>
+              </div>
+            </div>
+
+            <div className="mb-8">
+              <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-3">Escolha a cor do seu avatar:</p>
+              <div className="grid grid-cols-3 gap-3">
+                {AVATAR_COLORS.map(color => (
+                  <button
+                    key={color.id}
+                    onClick={() => setSelectedColor(color.id)}
+                    className={`h-12 rounded-xl bg-gradient-to-br ${color.bg} flex items-center justify-center transition-all ${selectedColor === color.id ? 'ring-2 ring-emerald-500 ring-offset-2 dark:ring-offset-zinc-950 scale-105' : 'hover:scale-105 opacity-80 hover:opacity-100'}`}
+                    title={color.label}
+                  >
+                    {selectedColor === color.id && <Check className={`size-5 ${color.text}`} />}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button
+              onClick={handleUpdateProfile}
+              disabled={isUpdatingProfile}
+              className="flex h-12 w-full items-center justify-center rounded-xl bg-emerald-500 font-bold text-white dark:text-zinc-950 transition hover:bg-emerald-600 dark:hover:bg-emerald-400 disabled:opacity-50"
+            >
+              {isUpdatingProfile ? 'Salvando...' : 'Salvar Perfil'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/40 dark:bg-black/80 p-4 backdrop-blur-sm transition-colors">
           <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto no-scrollbar rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-6 shadow-2xl transition-colors duration-300">
@@ -485,14 +600,13 @@ export default function Page() {
         </div>
       )}
 
-      {/* MODAL DE LEITURA E COMENTÁRIOS */}
       {readingPost && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/40 dark:bg-black/80 p-4 backdrop-blur-sm transition-colors">
           <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto no-scrollbar rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-6 sm:p-10 shadow-2xl transition-colors duration-300">
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>
                 <div className="flex items-center gap-3 mb-4">
-                  <span className="flex size-10 items-center justify-center rounded-2xl text-xs font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-300">
+                  <span className={`flex size-10 items-center justify-center rounded-full bg-gradient-to-br ${getAvatarClasses(readingPost.authorColor)} text-sm font-bold shadow-sm`}>
                     {getInitials(readingPost.authorName)}
                   </span>
                   <div>
@@ -570,7 +684,7 @@ export default function Page() {
                 ) : (
                   comments.map(comment => (
                     <div key={comment.id} className="flex gap-3">
-                      <span className="flex size-8 items-center justify-center rounded-xl text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 shrink-0">
+                      <span className={`flex size-8 items-center justify-center rounded-full bg-gradient-to-br ${getAvatarClasses(comment.authorColor)} text-[10px] font-bold shadow-sm shrink-0`}>
                         {getInitials(comment.authorName)}
                       </span>
                       <div className="flex-1">
