@@ -27,5 +27,5 @@ messaging.onBackgroundMessage((payload) => {
     icon: '/icon-192x192.png' // Ícone que vai aparecer na notificação
   };
 
-  self.registration.showNotification(notificationTitle, notificationOptions);
+  //self.registration.showNotification(notificationTitle, notificationOptions);
 });
