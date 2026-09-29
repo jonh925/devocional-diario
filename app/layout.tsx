@@ -5,6 +5,7 @@ import './globals.css'
 export const metadata: Metadata = {
   title: 'Devocional | Comunidade de fé',
   description: 'Compartilhe, leia e viva uma palavra de fé todos os dias.',
+  manifest: "/manifest.json",
   generator: 'v0.app',
   icons: {
     icon: [

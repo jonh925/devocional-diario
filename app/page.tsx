@@ -2,13 +2,13 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { auth, db,messaging } from '@/lib/firebase'
+import { auth, db, messaging } from '@/lib/firebase'
 import { getToken } from 'firebase/messaging'
 import { onAuthStateChanged } from 'firebase/auth'
-import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, getDoc, updateDoc, deleteDoc, arrayUnion, arrayRemove } from 'firebase/firestore'
-import { BookOpen, Check, Heart, HandHeart, PenLine, Sparkles, Loader2, LogOut, Shield, X, Edit2, Trash2, MessageCircle, Send, Sun, Moon, Bell, BellRing } from 'lucide-react'
-import { hasForbiddenWords ,hasLinks } from '@/lib/badwords'
-
+import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, doc, getDoc, updateDoc, deleteDoc, arrayUnion, arrayRemove,limit } from 'firebase/firestore'
+import { BookOpen, Check, Heart, HandHeart, PenLine, Sparkles, Loader2, LogOut, Shield, X, Edit2, Trash2, MessageCircle, Send, Sun, Moon, Bell, BellRing, Share2, Download } from 'lucide-react'
+import { hasForbiddenWords, hasLinks } from '@/lib/badwords'
+import { toPng } from 'html-to-image'
 
 const AVATAR_COLORS = [
   { id: 'emerald', bg: 'from-emerald-300 to-emerald-700', text: 'text-emerald-950', label: 'Verde' },
@@ -27,14 +27,21 @@ const getAvatarClasses = (colorId: string) => {
 export default function Page() {
   const router = useRouter()
   const [posts, setPosts] = useState<any[]>([])
+  // Controles de Paginação
+  const [postLimit, setPostLimit] = useState(5)
+  const [hasMore, setHasMore] = useState(true)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
   
   const [isLoading, setIsLoading] = useState(true)
   const [currentUser, setCurrentUser] = useState<any>(null)
 
   const [theme, setTheme] = useState<'light' | 'dark'>('dark')
   
-  // NOVO: Controle visual do Sininho de Notificação
   const [notificationsEnabled, setNotificationsEnabled] = useState(false)
+
+  // Estados para o PWA (Instalação do App)
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null)
+  const [isIOS, setIsIOS] = useState(false)
 
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [readingPostId, setReadingPostId] = useState<string | null>(null)
@@ -82,22 +89,51 @@ export default function Page() {
     return () => unsubscribe()
   }, [router])
 
-  // NOVO: Verifica se o usuário já deu permissão no navegador
   useEffect(() => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
       setNotificationsEnabled(Notification.permission === 'granted')
     }
   }, [])
 
+  // Hook do PWA
   useEffect(() => {
+    const ua = window.navigator.userAgent.toLowerCase()
+    if (/iphone|ipad|ipod/.test(ua)) {
+      setIsIOS(true)
+    }
+
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault()
+      setDeferredPrompt(e)
+    }
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+  }, [])
+
+ useEffect(() => {
     if (!currentUser) return
-    const q = query(collection(db, 'devocionais'), orderBy('createdAt', 'desc'))
+    
+    // Adicionamos o limit(postLimit) na query
+    const q = query(collection(db, 'devocionais'), orderBy('createdAt', 'desc'), limit(postLimit))
+    
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const fetched = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
       setPosts(fetched)
+      
+      // Se o Firebase trouxer menos posts do que o limite que pedimos,
+      // significa que chegamos ao fim do banco de dados (não há mais posts).
+      if (fetched.length < postLimit) {
+        setHasMore(false)
+      } else {
+        setHasMore(true)
+      }
+      
+      setIsLoadingMore(false)
     })
+    
     return () => unsubscribe()
-  }, [currentUser])
+  }, [currentUser, postLimit])
 
   useEffect(() => {
     if (!readingPostId) {
@@ -136,18 +172,29 @@ export default function Page() {
     }
   }
 
-  // NOVO: Lógica para pedir permissão ao celular/navegador
+  const handleInstallApp = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt()
+      const { outcome } = await deferredPrompt.userChoice
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null)
+      }
+    } else if (isIOS) {
+      alert('Para instalar no iPhone:\n\n1. Toque no ícone de "Compartilhar" (quadrado com seta) na barra inferior do Safari.\n2. Role para baixo e escolha "Adicionar à Tela de Início".')
+    } else {
+      alert('Parece que o aplicativo já está instalado no seu dispositivo!')
+    }
+  }
+
   const handleNotificationToggle = async () => {
     if (!('Notification' in window)) {
       alert('Seu dispositivo ou navegador não suporta notificações web.')
       return
     }
 
-    // SE O SININHO JÁ ESTÁ ATIVO, VAMOS DESATIVAR
     if (notificationsEnabled) {
       if (currentUser) {
         try {
-          // Muda o status no banco para false, assim o servidor ignora este usuário
           await updateDoc(doc(db, 'usuarios', currentUser.uid), {
             wantsNotifications: false
           })
@@ -160,7 +207,6 @@ export default function Page() {
       return
     }
 
-    // SE O SININHO ESTÁ DESATIVADO, VAMOS ATIVAR
     if (Notification.permission === 'default' || Notification.permission === 'granted') {
       const permission = await Notification.requestPermission()
       
@@ -217,6 +263,59 @@ export default function Page() {
     }
   }
 
+  // Função para Compartilhar como Imagem
+const handleShare = async (postId: string, postTitle: string) => {
+    const element = document.getElementById(`post-${postId}`)
+    if (!element) return
+
+    // 1. Identifica os elementos que queremos alterar só para a fotografia
+    const textElement = element.querySelector('p.line-clamp-3')
+    const actionFooter = element.querySelector('.border-t') // A secção dos botões em baixo
+    const adminButtons = element.querySelectorAll('button[title="Editar"], button[title="Apagar"]')
+
+    try {
+      // 2. Prepara o cenário: expande o texto e esconde a interface gráfica
+      if (textElement) textElement.classList.remove('line-clamp-3')
+      if (actionFooter) (actionFooter as HTMLElement).style.display = 'none'
+      adminButtons.forEach(btn => (btn as HTMLElement).style.display = 'none')
+
+      // Dá um compasso de espera minúsculo para o navegador redesenhar o texto expandido
+      await new Promise(resolve => setTimeout(resolve, 50))
+
+      // 3. Tira a fotografia com fundo limpo
+      const dataUrl = await toPng(element, { 
+        backgroundColor: theme === 'dark' ? '#09090b' : '#ffffff',
+        pixelRatio: 2,
+        style: { margin: '0' } // Evita cortes nas bordas
+      })
+      
+      const blob = await (await fetch(dataUrl)).blob()
+      const file = new File([blob], `devocional-${postId}.png`, { type: 'image/png' })
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          title: postTitle,
+          text: 'Leia a reflexão completa na nossa comunidade!',
+          files: [file]
+        })
+      } else {
+        const link = document.createElement('a')
+        link.download = `devocional-${postId}.png`
+        link.href = dataUrl
+        link.click()
+        alert('Imagem guardada! Agora já pode partilhar no seu Instagram.')
+      }
+    } catch (error) {
+      console.error("Erro ao gerar imagem para partilha:", error)
+      alert("Houve um erro ao tentar gerar a imagem.")
+    } finally {
+      // 4. Limpa o cenário: devolve o corte de texto e os botões ao site original
+      if (textElement) textElement.classList.add('line-clamp-3')
+      if (actionFooter) (actionFooter as HTMLElement).style.display = ''
+      adminButtons.forEach(btn => (btn as HTMLElement).style.display = '')
+    }
+  }
+
   const handleCommentSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newComment.trim() || !currentUser || !readingPostId) return
@@ -225,7 +324,6 @@ export default function Page() {
       alert("Por favor, revise a sua mensagem. Algumas palavras não são permitidas em nossa comunidade.")
       return
     }
-    // NOVO: Bloqueia os links nos comentários
     if (hasLinks(newComment)) {
       alert("Não é permitido enviar links na nossa comunidade.")
       return
@@ -279,7 +377,6 @@ export default function Page() {
       alert("Por favor, revise o seu texto. Algumas palavras utilizadas não são permitidas em nossa comunidade.")
       return
     }
-    // NOVO: Bloqueia os links nos títulos e conteúdos dos devocionais
     if (hasLinks(formData.title) || hasLinks(formData.content)) {
       alert("Não é permitido incluir links nos devocionais.")
       return
@@ -295,10 +392,8 @@ export default function Page() {
       }
 
       if (editingId) {
-        // Atualiza post existente (não envia notificação para não fazer spam)
         await updateDoc(doc(db, 'devocionais', editingId), postData)
       } else {
-        // Cria um NOVO post
         await addDoc(collection(db, 'devocionais'), {
           ...postData,
           authorName: currentUser.nome,
@@ -309,7 +404,6 @@ export default function Page() {
           createdAt: serverTimestamp()
         })
 
-        // NOVO: Chama o servidor para enviar a notificação push
         try {
           await fetch('/api/notify', {
             method: 'POST',
@@ -378,7 +472,16 @@ export default function Page() {
           
           <div className="flex items-center gap-1 sm:gap-2">
             
-            {/* NOVO: Botão de Notificação */}
+            {(deferredPrompt || isIOS) && (
+              <button 
+                onClick={handleInstallApp}
+                className="p-2 text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300 transition-colors rounded-full"
+                title="Instalar Aplicativo"
+              >
+                <Download className="size-5" />
+              </button>
+            )}
+
             <button 
               onClick={handleNotificationToggle}
               className="p-2 text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300 transition-colors rounded-full"
@@ -449,7 +552,7 @@ export default function Page() {
               const canEditOrDelete = currentUser?.uid === post.authorId || currentUser?.role === 'admin'
               
               return (
-                <article key={post.id} className="rounded-3xl border border-zinc-200 dark:border-white/[0.07] bg-white dark:bg-zinc-900 p-5 shadow-xl shadow-zinc-200/50 dark:shadow-2xl dark:shadow-black/10 transition hover:border-emerald-400/30 sm:p-6 duration-300">
+                <article id={`post-${post.id}`} key={post.id} className="rounded-3xl border border-zinc-200 dark:border-white/[0.07] bg-white dark:bg-zinc-900 p-5 shadow-xl shadow-zinc-200/50 dark:shadow-2xl dark:shadow-black/10 transition hover:border-emerald-400/30 sm:p-6 duration-300">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <span className={`flex size-10 items-center justify-center rounded-full bg-gradient-to-br ${getAvatarClasses(post.authorColor)} text-sm font-bold shadow-sm`}>
@@ -503,6 +606,13 @@ export default function Page() {
                     </button>
                     <div className="flex items-center gap-1">
                       <button 
+                        onClick={() => handleShare(post.id, post.title)}
+                        className="flex items-center gap-1.5 rounded-xl px-2.5 py-2 text-xs transition font-medium bg-transparent text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                        title="Compartilhar"
+                      >
+                        <Share2 className="size-4" />
+                      </button>
+                      <button 
                         onClick={() => toggleInteraction(post.id, 'likedBy', isLiked)}
                         className={`flex items-center gap-1.5 rounded-xl px-2.5 py-2 text-xs transition font-medium ${isLiked ? 'bg-rose-100 dark:bg-rose-500/15 text-rose-600 dark:text-rose-400' : 'bg-transparent dark:bg-transparent text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
                       >
@@ -521,6 +631,37 @@ export default function Page() {
             })
           )}
         </section>
+        {/* BOTÃO CARREGAR MAIS */}
+        {hasMore && posts.length >= postLimit && (
+          <div className="mt-8 flex justify-center">
+            <button
+              onClick={() => {
+                setIsLoadingMore(true)
+                setPostLimit(prev => prev + 2) 
+              }}
+              disabled={isLoadingMore}
+              className="flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-white/[0.07] bg-white dark:bg-zinc-900 px-6 py-3 text-sm font-semibold text-emerald-600 dark:text-emerald-400 shadow-sm transition hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50"
+            >
+              {isLoadingMore ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  A carregar...
+                </>
+              ) : (
+                'Carregar Mais'
+              )}
+            </button>
+          </div>
+        )}
+        
+        {/* Mensagem de Fim da Lista */}
+        {!hasMore && posts.length > 0 && (
+          <div className="mt-12 flex justify-center">
+            <p className="text-sm font-medium text-zinc-400 dark:text-zinc-500">
+              Chegou ao fim! Todos os devocionais foram carregados.
+            </p>
+          </div>
+        )}
       </div>
 
       <button 
