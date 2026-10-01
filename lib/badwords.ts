@@ -389,8 +389,14 @@ export const FORBIDDEN_WORDS = [
       return regex.test(lowerText)
     })
   }
-  export const hasLinks = (text: string) => {
-    // Essa regra identifica "http", "https", "www." e terminações como ".com", ".br", etc.
-    const urlPattern = /(https?:\/\/[^\s]+)|(www\.[^\s]+)|([a-zA-Z0-9-]+\.[a-z]{2,})/gi;
-    return urlPattern.test(text);
-  }
+export const hasLinks = (text: string) => {
+  if (!text) return false;
+
+  // 1. Bloqueia links óbvios que comecem com http, https ou www
+  const explicitLinkRegex = /(https?:\/\/|www\.)/i;
+  
+  // 2. Bloqueia apenas terminações de domínios reais, exigindo que sejam o fim de uma palavra
+  const domainRegex = /\b[a-zA-Z0-9-]+\.(com|br|org|net|gov|edu|io|me|app|pt)\b/i;
+
+  return explicitLinkRegex.test(text) || domainRegex.test(text);
+}
