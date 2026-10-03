@@ -235,7 +235,7 @@ export default function Page() {
     } catch (error) {}
   }
 
-  const handleShare = async (postId: string, postTitle: string) => {
+ const handleShare = async (postId: string, postTitle: string) => {
     const element = document.getElementById(`post-${postId}`)
     if (!element) return
 
@@ -243,12 +243,19 @@ export default function Page() {
     const actionFooter = element.querySelector('.post-actions')
     const carouselControls = element.querySelector('.carousel-controls')
     const adminButtons = element.querySelectorAll('button[title="Editar"], button[title="Apagar"]')
+    
+    // NOVA LINHA: Seleciona a marca de água
+    const watermark = element.querySelector('.brand-watermark')
 
     try {
       if (textElement) textElement.classList.remove('line-clamp-3')
       if (actionFooter) (actionFooter as HTMLElement).style.display = 'none'
       if (carouselControls) (carouselControls as HTMLElement).style.display = 'none'
       adminButtons.forEach(btn => (btn as HTMLElement).style.display = 'none')
+      
+      // NOVA LINHA: Mostra a marca de água
+      if (watermark) watermark.classList.remove('hidden')
+      if (watermark) watermark.classList.add('flex')
 
       await new Promise(resolve => setTimeout(resolve, 50))
 
@@ -282,6 +289,10 @@ export default function Page() {
       if (actionFooter) (actionFooter as HTMLElement).style.display = ''
       if (carouselControls) (carouselControls as HTMLElement).style.display = ''
       adminButtons.forEach(btn => (btn as HTMLElement).style.display = '')
+      
+      // NOVA LINHA: Esconde a marca de água novamente
+      if (watermark) watermark.classList.add('hidden')
+      if (watermark) watermark.classList.remove('flex')
     }
   }
 
@@ -579,6 +590,16 @@ export default function Page() {
                     
                     return (
                       <article id={`post-${post.id}`} key={post.id} className="rounded-3xl border border-zinc-200 dark:border-white/[0.07] bg-white dark:bg-zinc-900 p-5 shadow-xl shadow-zinc-200/50 dark:shadow-2xl dark:shadow-black/10 transition hover:border-emerald-400/30 sm:p-6 duration-300">
+                        {/* MARCA DE ÁGUA OCULTA (Só aparece no print exportado) */}
+                        <div className="brand-watermark hidden items-center gap-2 mb-5 pb-5 border-b border-zinc-100 dark:border-white/[0.06]">
+                          <div className="flex size-8 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                            <BookOpen aria-hidden="true" className="size-4" />
+                          </div>
+                          <div>
+                            <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-400">Comunidade</p>
+                            <p className="text-sm font-bold tracking-tight text-zinc-900 dark:text-zinc-50">Devocional</p>
+                          </div>
+                        </div>
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex items-center gap-3">
                             <span className={`flex size-10 items-center justify-center rounded-full bg-gradient-to-br ${getAvatarClasses(post.authorColor)} text-sm font-bold shadow-sm`}>
